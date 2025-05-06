@@ -184,13 +184,14 @@ class SaleOrder(models.Model):
         if avatax_config.use_partner_invoice_id:
             partner = self.partner_invoice_id
         taxable_lines = self._avatax_prepare_lines(self.order_line)
+        shipping_address = self.tax_address_id or self.partner_id
         tax_result = avatax_config.create_transaction(
             self.date_order,
             self.name,
             doc_type,
             partner,
             self.warehouse_id.partner_id or self.company_id.partner_id,
-            self.tax_address_id or self.partner_id,
+            shipping_address,
             taxable_lines,
             self.user_id,
             self.exemption_code or None,
@@ -199,20 +200,23 @@ class SaleOrder(models.Model):
             log_to_record=self,
         )
         tax_result_lines = {int(x["lineNumber"]): x for x in tax_result["lines"]}
+        is_recalculate_tax_rate = shipping_address.state_id.recalculate_tax_rate
         for line in self.order_line:
             tax_result_line = tax_result_lines.get(line.id)
             if tax_result_line:
                 # Should we check the rate with the tax amount?
                 # tax_amount = tax_result_line["taxCalculated"]
                 # rate = round(tax_amount / line.price_subtotal * 100, 2)
-                # rate = tax_result_line["rate"]
-                tax_calculation = 0.0
-                if tax_result_line["taxableAmount"]:
-                    tax_calculation = (
-                        tax_result_line["taxCalculated"]
-                        / tax_result_line["taxableAmount"]
-                    )
-                rate = round(tax_calculation * 100, 4)
+                if not is_recalculate_tax_rate:
+                    rate = tax_result_line["rate"]
+                else:
+                    tax_calculation = 0.0
+                    if tax_result_line["taxableAmount"]:
+                        tax_calculation = (
+                            tax_result_line["taxCalculated"]
+                            / tax_result_line["taxableAmount"]
+                        )
+                    rate = round(tax_calculation * 100, 4)
                 tax = Tax.get_avalara_tax(rate, doc_type)
                 tax, line = self.update_tax_details(tax, line, tax_result_line)
                 if tax not in line.tax_id:

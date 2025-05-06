@@ -1,0 +1,12 @@
+<odoo>
+    <record id="view_country_state_tree" model="ir.ui.view">
+        <field name="name">res.country.state.tree</field>
+        <field name="model">res.country.state</field>
+        <field name="inherit_id" ref="base.view_country_state_tree" />
+        <field name="arch" type="xml">
+            <tree position="inside">
+                <field name="recalculate_tax_rate" widget="boolean_toggle" />
+            </tree>
+        </field>
+    </record>
+</odoo>
