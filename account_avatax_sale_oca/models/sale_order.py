@@ -1,17 +1,55 @@
-from odoo import api, fields, models
+from odoo import _, api, fields, models
+from odoo.tools.misc import formatLang
 
 
 class SaleOrder(models.Model):
     _inherit = "sale.order"
 
     @api.depends(
-        "order_line.tax_id", "order_line.price_unit", "amount_total", "amount_untaxed"
+        "order_line.tax_id",
+        "order_line.price_unit",
+        "amount_total",
+        "amount_untaxed",
+        "tax_amount",
     )
     def _compute_tax_totals(self):
-        # Make the Sales Order data available to the AccountTax.compute_all() method
-        # This is needed to take in consideration the additional Avatax fields
-        enriched_self = self.with_context(for_avatax_object=self)
-        return super(SaleOrder, enriched_self)._compute_tax_totals()
+        res = super()._compute_tax_totals()
+        group_name = _("Untaxed Amount")
+        for order in self.filtered(lambda so: so.fiscal_position_id.is_avatax):
+            currency = order.currency_id
+            tax_totals = order.tax_totals
+            tax_totals["groups_by_subtotal"] = {
+                group_name: [
+                    {
+                        "tax_group_name": _("Taxes"),
+                        "tax_group_amount": order.tax_amount,
+                        "tax_group_base_amount": order.amount_untaxed,
+                        "formatted_tax_group_amount": formatLang(
+                            self.env, order.tax_amount, currency_obj=currency
+                        ),
+                        "formatted_tax_group_base_amount": formatLang(
+                            self.env, order.amount_untaxed, currency_obj=currency
+                        ),
+                        "tax_group_id": 1,
+                        "group_key": 1,
+                    }
+                ]
+            }
+            tax_totals["subtotals"] = [
+                {
+                    "name": group_name,
+                    "amount": order.amount_untaxed,
+                    "formatted_amount": formatLang(
+                        self.env, order.amount_untaxed, currency_obj=currency
+                    ),
+                }
+            ]
+            tax_totals["amount_total"] = order.amount_total
+            tax_totals["formatted_amount_total"] = formatLang(
+                self.env, order.amount_total, currency_obj=currency
+            )
+            order.tax_totals = tax_totals
+        return res
 
     @api.model
     @api.depends("company_id", "partner_id", "partner_invoice_id", "state")
@@ -211,11 +249,11 @@ class SaleOrder(models.Model):
                 fixed = detail.get("unitOfBasis") == "FlatAmount"
                 rate = detail["rate"] if fixed else detail["rate"] * 100
                 tax_group_name = detail["taxName"].removesuffix(" TAX")
-                tax_name_display = "%s %s" % (
+                tax_name = "%s %s" % (
                     tax_group_name,
                     ("$ %.4g" if fixed else "%.4g%%") % round(rate, 4),
                 )
-                tax = Tax.get_avalara_tax(rate, doc_type, tax_name=tax_name_display)
+                tax = Tax.get_avalara_tax(rate, doc_type, tax_name=tax_name)
                 tax, line = self.update_tax_details(tax, line, tax_result_line)
                 new_taxes |= tax
             if new_taxes not in line.tax_id:
